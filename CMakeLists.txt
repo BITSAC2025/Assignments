@@ -1,7 +1,7 @@
 # Specify the minimum version of CMake required to build the project
 cmake_minimum_required(VERSION 3.23)
 
-project(Static-Program-Analysis)
+project(Assignments)
 
 if (DEFINED ENV{SVF_DIR})
     set(SVF_DIR $ENV{SVF_DIR})

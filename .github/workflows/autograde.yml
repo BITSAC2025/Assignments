@@ -1,0 +1,90 @@
+name: AutoGrader
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  SVF_DIR: ${{ github.workspace }}/SVF
+
+jobs:
+  grade-assignment:
+    runs-on: ubuntu-latest
+    name: Compare with Reference Answer
+
+    steps:
+      # Checkout student's code
+      - name: Checkout Student's Code
+        uses: actions/checkout@v4
+
+      # Install system dependencies
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update
+          sudo apt-get install cmake gcc g++ nodejs doxygen graphviz lcov libncurses5-dev libtinfo6 libzstd-dev
+
+      # Checkout and build SVF dependency
+      - name: Checkout and Build SVF
+        uses: actions/checkout@v4
+        with:
+          repository: your-organization-name/SVF
+          path: SVF
+
+      # Build and install SVF
+      - name: Build SVF
+        run: |
+          cd SVF
+          chmod +x build.sh
+          ./build.sh
+
+      # Compile student's code
+      - name: Compile Student's Code
+        run: |
+          chmod +x build.sh
+          ./build.sh
+
+      # Checkout reference answer and test scripts
+      - name: Checkout Answer Repository
+        uses: actions/checkout@v4
+        with:
+          repository: your-organization-name/Answers
+          token: ${{ secrets.ORG_ACCESS_TOKEN }}
+          path: answer-repo
+
+      # Step 7: Run student's code and capture output
+      - name: Run Student's Code
+        run: |
+          ./main > student_output.txt 2>&1
+
+      # Step 8: Checkout reference answer
+      - name: Checkout Reference Answer
+        uses: actions/checkout@v4
+        with:
+          repository: your-organization-name/assignment-answer
+          token: ${{ secrets.ORG_ACCESS_TOKEN }}
+          path: answer-repo
+
+      # Step 9: Compare outputs
+      - name: Compare Outputs
+        run: |
+          echo "--- Student Output ---"
+          cat student_output.txt
+          echo ""
+          echo "--- Expected Output ---"
+          cat answer-repo/expected_output.txt
+          echo ""
+          echo "--- Diff Result ---"
+          diff -b student_output.txt answer-repo/expected_output.txt
+
+      # Step 10: Upload artifacts for debugging
+      - name: Upload Results as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: grading-artifacts
+          path: |
+            student_output.txt
+            answer-repo/expected_output.txt
+          retention-days: 1
