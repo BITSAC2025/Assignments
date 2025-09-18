@@ -7,6 +7,7 @@ on:
 
 env:
   SVF_DIR: ${{ github.workspace }}/SVF
+  ASSIGNMENT_DIR: ${{ github.workspace }}
 
 jobs:
   grade-assignment:
@@ -30,7 +31,7 @@ jobs:
       - name: Checkout and Build SVF
         uses: actions/checkout@v4
         with:
-          repository: your-organization-name/SVF
+          repository: BITSAC2025/SVF
           path: SVF
 
       # Build and install SVF
@@ -50,41 +51,81 @@ jobs:
       - name: Checkout Answer Repository
         uses: actions/checkout@v4
         with:
-          repository: your-organization-name/Answers
+          repository: BITSAC2025/Answers
           token: ${{ secrets.ORG_ACCESS_TOKEN }}
           path: answer-repo
 
-      # Step 7: Run student's code and capture output
+      # Prepare test environment
+      - name: Prepare Test Environment
+        run: |
+          cp answer-repo/Assignment-2-IR/autogen.sh $ASSIGNMENT_DIR/Assignment-2-IR
+          cp answer-repo/Assignment-2-IR/normgraph.sh $ASSIGNMENT_DIR/Assignment-2-IR
+          cd $ASSIGNMENT_DIR/Assignment-2-IR
+          chmod +x autogen.sh normgraph.sh
+
+      # Run student's code and capture output
       - name: Run Student's Code
         run: |
-          ./main > student_output.txt 2>&1
+          cd $ASSIGNMENT_DIR/Assignment-2-IR
+          ./autogen.sh
 
-      # Step 8: Checkout reference answer
-      - name: Checkout Reference Answer
-        uses: actions/checkout@v4
-        with:
-          repository: your-organization-name/assignment-answer
-          token: ${{ secrets.ORG_ACCESS_TOKEN }}
-          path: answer-repo
-
-      # Step 9: Compare outputs
-      - name: Compare Outputs
+      # Compare answers
+      - name: Compare Answers
         run: |
-          echo "--- Student Output ---"
-          cat student_output.txt
+          ANSWER_SOURCE_DIR="answer-repo/Assignment-2-IR/answers"
+          ANSWER_STUDENT_DIR="$ASSIGNMENT_DIR/Assignment-2-IR/answers"
+          RESULTS_DIR="$ASSIGNMENT_DIR/Assignment-2-IR/test-results"
+          mkdir -p $RESULTS_DIR
+          
+          correct_count=0
+          wrong_count=0
+          total_count=0
+          
+          echo "Starting answer comparison..."
+          echo "Reference answers: $ANSWER_SOURCE_DIR"
+          echo "Student answers: $ANSWER_STUDENT_DIR"
           echo ""
-          echo "--- Expected Output ---"
-          cat answer-repo/expected_output.txt
-          echo ""
-          echo "--- Diff Result ---"
-          diff -b student_output.txt answer-repo/expected_output.txt
+          
+          if [ ! -d "$ANSWER_STUDENT_DIR" ]; then
+            echo "Student answers directory not found: $ANSWER_STUDENT_DIR"
+            exit 1
+          fi
+          
+          for answer_file in $ANSWER_SOURCE_DIR/*; do
+            if [ -f "$answer_file" ]; then
+              filename=$(basename "$answer_file")
+              student_file="$ANSWER_STUDENT_DIR/$filename"
+              total_count=$((total_count + 1))
+            
+              if [ -f "$student_file" ]; then
+                if diff -b -q "$answer_file" "$student_file" > /dev/null; then
+                  echo "CORRECT: $filename"
+                  correct_count=$((correct_count + 1))
+                else
+                  echo "WRONG: $filename"
+                  wrong_count=$((wrong_count + 1))
+                  diff -b "$answer_file" "$student_file" > "$RESULTS_DIR/diff_$filename" 2>&1 || true
+                fi
+              else
+                echo "MISSING: $filename (student file not found)"
+                wrong_count=$((wrong_count + 1))
+              fi
+              echo ""
+            fi
+          done
+          
+          echo "=================== SUMMARY ==================="
+          echo "Total files compared: $total_count"
+          echo "Correct answers: $correct_count"
+          echo "Wrong/Missing answers: $wrong_count"
+          
+          echo "Total: $total_count, Correct: $correct_count, Wrong: $wrong_count" > "$RESULTS_DIR/summary.txt"
 
-      # Step 10: Upload artifacts for debugging
+      # Upload artifacts
       - name: Upload Results as Artifact
         uses: actions/upload-artifact@v4
         with:
           name: grading-artifacts
           path: |
-            student_output.txt
-            answer-repo/expected_output.txt
-          retention-days: 1
+            $ASSIGNMENT_DIR/test-results/
+          retention-days: 365
