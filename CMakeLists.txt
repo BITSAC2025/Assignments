@@ -35,11 +35,13 @@ include_directories(SYSTEM ${SVF_INSTALL_INCLUDE_DIR})
 link_directories(${SVF_INSTALL_LIB_DIR})
 set(SVF_LIB SvfLLVM SvfCore)
 
-# If the LLVM_DIR environment variable is set, configure CMake build flags and standards for C++ and C
-if (DEFINED ENV{LLVM_DIR})
-    set(LLVM_DIR $ENV{LLVM_DIR})
-else ()
+set(SVF_DIR $ENV{SVF_DIR})
+if (EXISTS "${SVF_DIR}/llvm-16.0.0.obj")
     set(LLVM_DIR ${SVF_DIR}/llvm-16.0.0.obj)
+    message(STATUS "find ${LLVM_DIR}")
+elseif (DEFINED ENV{LLVM_DIR})
+    set(LLVM_DIR $ENV{LLVM_DIR})
+    message(STATUS "find ${LLVM_DIR}")
 endif ()
 # Locate and use the LLVM package for the project
 find_package(LLVM 16.0.0 REQUIRED CONFIG HINTS
@@ -87,9 +89,8 @@ set(LLVM_LIB LLVM)
 
 if (DEFINED SUBDIRS)
     foreach (subdir IN LISTS SUBDIRS)
-#        message(${subdir})
         string(STRIP "${subdir}" subdir_clean)
-        if(IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/${subdir_clean})
+        if (IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/${subdir_clean})
             add_subdirectory(${subdir_clean})
         endif ()
     endforeach ()
