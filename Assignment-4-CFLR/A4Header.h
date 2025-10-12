@@ -14,19 +14,17 @@ using EdgeLabel = unsigned;
 
 enum EdgeLabelType
 {
-    Addr,
-    AddrBar,
-    Copy,
-    CopyBar,
-    Store,
-    StoreBar,
-    Load,
-    LoadBar,
-    PT,
-    VF,
-    VFBar,
-    VA,
-    VABar
+    Addr, AddrBar,
+    Copy, CopyBar,
+    Store, StoreBar,
+    Load, LoadBar,
+    PT, PTBar,
+    SV, SVBar,
+    PV, PVBar,
+    VP, VPBar,
+    VF, VFBar,
+    VA, VABar,
+    LV, LVBar,
 };
 
 
