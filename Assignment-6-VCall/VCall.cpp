@@ -22,12 +22,12 @@ int main(int argc, char** argv)
     consg->dump();
 
     Andersen andersen(consg);
+    auto cg = pag->getCallGraph();
 
     // TODO: complete the following two methods
     andersen.runPointerAnalysis();
-    andersen.updateCallGraph();
+    andersen.updateCallGraph(cg);
 
-    auto cg = pag->getCallGraph();
     cg->dump();
     SVF::LLVMModuleSet::releaseLLVMModuleSet();
 	return 0;
@@ -41,7 +41,7 @@ void Andersen::runPointerAnalysis()
 }
 
 
-void Andersen::updateCallGraph()
+void Andersen::updateCallGraph(SVF::CallGraph* cg)
 {
     // TODO: complete this method.
     //  The implementation of call graph is provided in the SVF library

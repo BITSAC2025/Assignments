@@ -69,7 +69,7 @@ public:
     /// Run pointer analysis
     void runPointerAnalysis();
     /// Update call graph
-    void updateCallGraph();
+    void updateCallGraph(SVF::CallGraph* cg);
     /// Dump results into a file
     void dumpResult();
 
