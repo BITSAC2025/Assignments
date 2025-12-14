@@ -260,40 +260,6 @@ void AbstractExecution::updateStateOnSelect(const SelectStmt *select)
     }
 }
 
-IntervalValue AbstractExecution::getAccessOffset(NodeID objId, const GepStmt *gep)
-{
-    auto obj = svfir->getGNode(objId);
-    AbstractState &as = getAbsStateFromTrace(gep->getICFGNode());
-    // Field-insensitive base object
-    if (SVFUtil::isa<BaseObjVar>(obj))
-    {
-        // get base size
-        IntervalValue accessOffset = as.getByteOffset(gep);
-        return accessOffset;
-    }
-        // A sub object of an aggregate object
-    else if (SVFUtil::isa<GepObjVar>(obj))
-    {
-        IntervalValue accessOffset =
-                bufOverflowHelper.getGepObjOffsetFromBase(SVFUtil::cast<GepObjVar>(obj)) + as.getByteOffset(gep);
-        return accessOffset;
-    }
-    else
-    {
-        assert(SVFUtil::isa<DummyObjVar>(obj) && "What other types of object?");
-        return IntervalValue::top();
-    }
-}
-
-/// Report a buffer overflow for a given ICFG node
-void AbstractExecution::reportBufOverflow(const ICFGNode *node)
-{
-    // Create an exception with the node's string representation
-    AEException bug(node->toString());
-    // Add the bug to the reporter using the helper
-    bufOverflowHelper.addBugToReporter(bug, node);
-}
-
 bool AbstractExecution::isExternalCallForAssignment(const SVF::FunObjVar *func)
 {
     Set<std::string> extFuncs = {"mem_insert", "str_insert"};
@@ -355,58 +321,6 @@ void AbstractExecution::initWTO()
             if (const ICFGCycleWTO *cycle = SVFUtil::dyn_cast<ICFGCycleWTO>(comp))
             {
                 cycleHeadToCycle[cycle->head()->getICFGNode()] = cycle;
-            }
-        }
-    }
-}
-
-/**
- * @brief Update the offset of a GEP (GetElementPtr) object from its base address
- *
- * This function updates the offset of a GEP object from its base address in the abstract state.
- * It handles both field-insensitive base objects and sub-objects of aggregate objects.
- * The function calculates the new offset based on the provided GEP addresses and the offset interval.
- *
- * @param as The abstract state in this context
- * @param gepAddrs The set of addresses for the GEP object
- * @param objAddrs The set of addresses for the object
- * @param offset The interval value representing the offset
- */
-void
-AbstractExecution::updateGepObjOffsetFromBase(AbstractState &as, SVF::AddressValue gepAddrs, SVF::AddressValue objAddrs,
-                                              SVF::IntervalValue offset)
-{
-    for (const auto &objAddr : objAddrs)
-    {
-        NodeID objId = as.getIDFromAddr(objAddr);
-        auto obj = svfir->getGNode(objId);
-        if (SVFUtil::isa<BaseObjVar>(obj))
-        {
-            for (const auto &gepAddr : gepAddrs)
-            {
-                NodeID gepObj = as.getIDFromAddr(gepAddr);
-                const GepObjVar *gepObjVar = SVFUtil::cast<GepObjVar>(svfir->getGNode(gepObj));
-                bufOverflowHelper.addToGepObjOffsetFromBase(gepObjVar, offset);
-            }
-        }
-        else if (SVFUtil::isa<GepObjVar>(obj))
-        {
-            const GepObjVar *objVar = SVFUtil::cast<GepObjVar>(obj);
-            for (const auto &gepAddr : gepAddrs)
-            {
-                NodeID gepObj = as.getIDFromAddr(gepAddr);
-                const GepObjVar *gepObjVar = SVFUtil::cast<GepObjVar>(svfir->getGNode(gepObj));
-                if (bufOverflowHelper.hasGepObjOffsetFromBase(objVar))
-                {
-                    IntervalValue objOffsetFromBase = bufOverflowHelper.getGepObjOffsetFromBase(objVar);
-                    /// make sure gepObjVar has not been written before
-                    if (!bufOverflowHelper.hasGepObjOffsetFromBase(gepObjVar))
-                        bufOverflowHelper.addToGepObjOffsetFromBase(gepObjVar, objOffsetFromBase + offset);
-                }
-                else
-                {
-                    assert(false && "gepRhsObjVar has no gepObjOffsetFromBase");
-                }
             }
         }
     }
@@ -872,49 +786,6 @@ void AbstractExecution::handleSingletonWTO(const ICFGSingletonWTO *icfgSingleton
 }
 
 /**
- * @brief Handle a node in the ICFG
- *
- * This function handles a node in the ICFG by merging the abstract states of its predecessors,
- * updating the abstract state based on the node's statements, and handling stub functions.
- * It also checks if the abstract state has reached a fixpoint and returns the result.
- * Return true means the abstract state has changed
- * Return false means the abstract state has reached a fixpoint or is infeasible
- *
- * @param node The node to be handled
- * @return True if the abstract state has changed, false if it has reached a fixpoint or is infeasible
- */
-bool AbstractExecution::handleICFGNode(const ICFGNode *node)
-{
-    AbstractState tmpEs;
-    bool is_feasible = mergeStatesFromPredecessors(node, tmpEs);
-    if (!is_feasible)
-    {
-        SVFUtil::errs() << "Infeasible for node " << node->getId() << "\n";
-        return false;
-    }
-    preAbsTrace[node] = tmpEs;
-    // Store the last abstract state, used to check if the abstract state has reached a fixpoint
-    AbstractState last_as = postAbsTrace[node];
-    postAbsTrace[node] = preAbsTrace[node];
-    for (const SVFStmt *stmt : node->getSVFStmts())
-    {
-        updateAbsState(stmt);
-//        bufOverflowDetection(stmt);
-    }
-
-    if (const CallICFGNode *callNode = SVFUtil::dyn_cast<CallICFGNode>(node))
-    {
-        handleCallSite(callNode);
-    }
-    // If the abstract state is the same as the last abstract state, return false because we have reached fixpoint
-    if (postAbsTrace[node] == last_as)
-    {
-        return false;
-    }
-    return true;
-}
-
-/**
  * @brief Handle state updates for each type of SVF statement
  *
  * This function updates the abstract state based on the type of SVF statement provided.
@@ -1066,67 +937,6 @@ std::vector<const ICFGNode *> AbstractExecution::getNextNodes(const ICFGNode *no
     return outEdges;
 }
 
-/**
- * @brief Get the next nodes of a cycle
- *
- * Returns the next nodes of cycle components that are outside the cycle.
- * Inner cycles are skipped since their next nodes cannot be outside the outer cycle.
- * And Inner cycles are handled in the outer cycle.
- * Only nodes that point outside the cycle are included in cycleNext.
- *
- * @param cycle The cycle to get the next nodes of
- * @return The next nodes of the cycle
- */
-std::vector<const ICFGNode *> AbstractExecution::getNextNodesOfCycle(const ICFGCycleWTO *cycle) const
-{
-    Set<const ICFGNode *> cycleNodes;
-    // Insert the head of the cycle and the heads of the inner cycles
-    cycleNodes.insert(cycle->head()->getICFGNode());
-    for (const ICFGWTOComp *comp : cycle->getWTOComponents())
-    {
-        if (const ICFGSingletonWTO *singleton = SVFUtil::dyn_cast<ICFGSingletonWTO>(comp))
-        {
-            cycleNodes.insert(singleton->getICFGNode());
-        }
-        else if (const ICFGCycleWTO *subCycle = SVFUtil::dyn_cast<ICFGCycleWTO>(comp))
-        {
-            cycleNodes.insert(subCycle->head()->getICFGNode());
-        }
-    }
-    std::vector<const ICFGNode *> outEdges;
-    std::vector<const ICFGNode *> nextNodes = getNextNodes(cycle->head()->getICFGNode());
-    for (const ICFGNode *nextNode : nextNodes)
-    {
-        // Only nodes that point outside the cycle are included
-        if (cycleNodes.find(nextNode) == cycleNodes.end())
-        {
-            outEdges.push_back(nextNode);
-        }
-    }
-    for (const ICFGWTOComp *comp : cycle->getWTOComponents())
-    {
-        if (const ICFGSingletonWTO *singleton = SVFUtil::dyn_cast<ICFGSingletonWTO>(comp))
-        {
-            std::vector<const ICFGNode *> nextNodes = getNextNodes(singleton->getICFGNode());
-            // Only nodes that point outside the cycle are included
-            for (const ICFGNode *nextNode : nextNodes)
-            {
-                if (cycleNodes.find(nextNode) == cycleNodes.end())
-                {
-                    outEdges.push_back(nextNode);
-                }
-            }
-        }
-        else if (const ICFGCycleWTO *subCycle = SVFUtil::dyn_cast<ICFGCycleWTO>(comp))
-        {
-            // skip inner cycle inside the outer cycle, because 1) it will be handled in the outer cycle.
-            //2) its next nodes won't be outside the outer cycle.
-            continue;
-        }
-    }
-    return outEdges;
-}
-
 void AbstractExecution::handleFunction(const CallICFGNode *callNode)
 {
     const FunObjVar *calleeFun =callNode->getCalledFunction();
@@ -1246,46 +1056,4 @@ void AbstractExecution::handleStubFunctions(const SVF::CallICFGNode *callNode)
             assert(false);
         }
     }
-}
-
-
-void AbstractExecution::updateStateOnExtCall(const SVF::CallICFGNode *extCallNode)
-{
-    std::string funcName = extCallNode->getCalledFunction()->getName();
-    // void mem_insert(void *buffer, const void *data, size_t data_size, size_t position);
-    if (funcName == "mem_insert")
-    {
-        // check sizeof(buffer) > position + data_size
-    }
-        // void str_insert(void *buffer, const void *data, size_t position);
-    else if (funcName == "str_insert")
-    {
-        // check sizeof(buffer) > position + strlen(data)
-
-    }
-}
-
-/**
- * @brief Handle ICFG nodes in a cycle using widening and narrowing operators
- *
- * This function implements abstract interpretation for cycles in the ICFG using widening and narrowing
- * operators to ensure termination. It processes all ICFG nodes within a cycle and implements
- * widening-narrowing iteration to reach fixed points twice: once for widening (to ensure termination)
- * and once for narrowing (to improve precision).
- *
- * @param cycle The WTO cycle containing ICFG nodes to be processed
- * @return void
- */
-void AbstractExecution::handleICFGCycle(const ICFGCycleWTO *cycle)
-{
-    const ICFGNode *head = cycle->head()->getICFGNode();
-    bool increasing = true;
-    u32_t iteration = 0;
-    u32_t widen_delay = Options::WidenDelay(); // or use a class member if you have one
-
-    while (true)
-    {
-        /// TODO: your code starts from here
-    }
-
 }

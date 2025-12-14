@@ -42,9 +42,6 @@ public:
     /// Handle state updates for each type of SVF statement
     virtual void updateAbsState(const SVFStmt *stmt);
 
-    /// Report a buffer overflow for a given ICFG node
-    void reportBufOverflow(const ICFGNode *node);
-
     // handle SVF Statements
     ///@{
     void updateStateOnAddr(const AddrStmt *addr);
@@ -58,7 +55,6 @@ public:
     void updateStateOnPhi(const PhiStmt *phi);
     void updateStateOnBinary(const BinaryOPStmt *binary);
     void updateStateOnSelect(const SelectStmt *select);
-    void updateStateOnExtCall(const SVF::CallICFGNode *extCallNode);
     ///@}
 
     /// Handle stub functions for verifying abstract interpretation results
@@ -85,25 +81,12 @@ public:
 
     /// Get the next nodes of a node
     std::vector<const ICFGNode *> getNextNodes(const ICFGNode *node) const;
-    /// Get the next nodes of a cycle
-    std::vector<const ICFGNode *> getNextNodesOfCycle(const ICFGCycleWTO *cycle) const;
-
-    bool handleICFGNode(const ICFGNode *node);
-
-    void handleICFGCycle(const ICFGCycleWTO *cycle);
 
     /// Return its abstract state given an ICFGNode
     AbstractState &getAbsStateFromTrace(const ICFGNode *node)
     {
         return postAbsTrace[node];
     }
-
-    /// Update the offset of a GEP (GetElementPtr) object from its base address
-    void
-    updateGepObjOffsetFromBase(AbstractState &as, AddressValue gepAddrs, AddressValue objAddrs, IntervalValue offset);
-
-    /// Return the accessing offset of an object at a GepStmt
-    IntervalValue getAccessOffset(NodeID objId, const GepStmt *gep);
 
     void ensureAllAssertsValidated();
 
